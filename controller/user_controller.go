@@ -40,6 +40,7 @@ func httpWriteResultAsJson(w http.ResponseWriter, obj interface{}) {
 	}
 }
 
+// not respone http header yet
 func httpWriteResultAsErr(w http.ResponseWriter, err error) {
 	result := ErrorResult{Code: 500, Msg: err.Error()}
 	resp, _ := json.Marshal(result)
@@ -109,6 +110,8 @@ func (usc *UserController) UpdateRelationship(w http.ResponseWriter, r *http.Req
 	var bodyReq UpdateRelationshipReq
 	json.Unmarshal(body, &bodyReq)
 
+	// 为什么不做枚举校验？
+	// 校验不通过返回422
 	if len(bodyReq.State) <= 0 {
 		httpWriteResultAsErr(w, errors.New("invalid argument : state"))
 		return

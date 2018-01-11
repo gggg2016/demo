@@ -44,6 +44,9 @@ func init() {
 	G_usd = new(UserDaoerImpl)
 }
 
+// 语句合入代码库
+// IF NOT EXIST
+// 可以考虑使用枚举
 func (usd *UserDaoerImpl) CreateTableRelationships() error {
 	_, err := G_db.Exec(`CREATE TABLE public.relationships
 								(
@@ -72,6 +75,8 @@ func (usd *UserDaoerImpl) CreateTableUsers() error {
 
 func (usd *UserDaoerImpl) Register(userName string) (int64, error) {
 	var uid int64
+	// need not set create_time, update_time, set column default value when creating table
+	// created_time and updated_time is better
 	err := G_db.QueryRow("INSERT INTO public.users(name,create_time,update_time) VALUES($1,now(),now()) RETURNING id",
 		username).Scan(&uid)
 	if err != nil {
@@ -106,6 +111,13 @@ func (usd *UserDaoerImpl) GetUser(userIds []int64) (map[int64]User, error) {
 	return usermap, nil
 }
 
+//
+// ListAllUsers
+// ListLikedUsers
+// ListDislikedUsers
+// ListMatchedUsers
+// 1. naming
+// 2. 可优化
 func (usd *UserDaoerImpl) ListAllUser() ([]User, error) {
 	stmt, err := G_db.Prepare("SELECT id,name FROM users ORDER BY id")
 	if err != nil {
@@ -196,6 +208,7 @@ func (usd *UserDaoerImpl) GetRelationship(first_user_id, second_user_id int64) (
 		var u1, u2 int64
 		var state int8
 		rows.Scan(&u1, &u2, &state)
+		// switch u1...case XXX
 		switch {
 		case u1 == first_user_id:
 			r1 = state
