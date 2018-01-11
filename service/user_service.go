@@ -29,6 +29,7 @@ func init() {
 
 func (uss *UserService) ListAllUsers() ([]UserModel, error) {
 	users, err := dao.G_usd.ListAllUser()
+	// len == 0 不应该返回错误吧？
 	if err != nil || len(users) <= 0 {
 		return nil, err
 	}
@@ -94,6 +95,7 @@ func (uss *UserService) UpdateRelationship(userId, otherUserId int64, state stri
 		st = dao.DISLIKE
 	}
 
+	// 为啥不使用定义好的dao.LIKE dao.DISLIKE
 	//update relationship state
 	if st == 1 || st == -1 {
 		dao.G_usd.UpdateRelationship(userId, otherUserId, st)
