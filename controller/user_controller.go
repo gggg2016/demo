@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"demo/service"
 	"net/http"
-	"errors"
 )
 
 type UserController struct {
@@ -27,81 +26,113 @@ type UpdateRelationshipReq struct {
 }
 
 type ErrorResult struct {
-	Code int    `json:"code"`
-	Msg  string `json:"msg"`
+	Msg string `json:"msg"`
 }
 
-func httpWriteResultAsJson(w http.ResponseWriter, obj interface{}) {
+/**
+ *正常返回json数据
+ */
+func httpWriteJsonResult(w http.ResponseWriter, obj interface{}) {
 	resp, err := json.Marshal(obj)
 	if err != nil {
-		httpWriteResultAsErr(w, err)
+		httpWriteErrResult(w)
 	} else {
+		w.Header().Set("Content-type", "application/json;charset=utf-8")
+		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
 	}
 }
 
-func httpWriteResultAsErr(w http.ResponseWriter, err error) {
-	result := ErrorResult{Code: 500, Msg: err.Error()}
+/**
+ *服务内部错误
+ */
+func httpWriteErrResult(w http.ResponseWriter) {
+	result := ErrorResult{Msg: "internal error"}
 	resp, _ := json.Marshal(result)
+	w.Header().Set("Content-type", "application/json;charset=utf-8")
+	w.WriteHeader(http.StatusInternalServerError)
 	w.Write(resp)
 }
 
-func (usc *UserController) ListAllUsers(w http.ResponseWriter, r *http.Request) {
-	ums, err := service.G_uss.ListAllUsers()
-
-	if err != nil {
-		httpWriteResultAsErr(w, err)
-		return
-	}
-
-	httpWriteResultAsJson(w, ums)
+/**
+ *参数错误
+ */
+func httpWriteIllegalArgResul(w http.ResponseWriter) {
+	result := ErrorResult{Msg: "illegal argument error"}
+	resp, _ := json.Marshal(result)
+	w.Header().Set("Content-type", "application/json;charset=utf-8")
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write(resp)
 }
 
+/**
+ *列出所有用户
+ */
+func (usc *UserController) ListAllUsers(w http.ResponseWriter, r *http.Request) {
+	ums, err := service.G_uss.ListAllUsers()
+	if err != nil {
+		httpWriteErrResult(w)
+		return
+	}
+	httpWriteJsonResult(w, ums)
+}
+
+/**
+ *创建新用户
+ */
 func (usc *UserController) CreateUser(w http.ResponseWriter, r *http.Request) {
 	body, _ := ioutil.ReadAll(r.Body)
 	var nameReq NameReq
 	json.Unmarshal(body, &nameReq)
 
 	if len(nameReq.Name) <= 0 {
-		httpWriteResultAsErr(w, errors.New("arguments, name, is invalid."))
+		httpWriteIllegalArgResul(w)
 		return
 	}
 
 	user, err := service.G_uss.CreateUser(nameReq.Name)
 	if err != nil {
-		httpWriteResultAsErr(w, err)
+		httpWriteErrResult(w)
 		return
 	}
 
-	httpWriteResultAsJson(w, user)
+	httpWriteJsonResult(w, user)
 }
 
+/**
+ *获取指定用户的所有关系
+ */
 func (usc *UserController) ListAllRelationshipOfUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	suid := vars["user_id"]
 	uid, err := strconv.ParseInt(suid, 10, 64)
 	if err != nil {
-		httpWriteResultAsErr(w, err)
+		httpWriteIllegalArgResul(w)
 		return
 	}
 	relationships, err := service.G_uss.ListAllRelationshipOfUser(uid)
 	if err != nil {
-		httpWriteResultAsErr(w, err)
+		httpWriteErrResult(w)
 		return
 	}
-	httpWriteResultAsJson(w, relationships)
+	httpWriteJsonResult(w, relationships)
 }
 
+/**
+ *更新指定用户之间的关系(左滑/右滑)
+ */
 func (usc *UserController) UpdateRelationship(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	suserId := vars["user_id"]
 	sotherUserId := vars["other_user_id"]
 	userId, err := strconv.ParseInt(suserId, 10, 64)
 	if err != nil {
+		httpWriteIllegalArgResul(w)
 		return
 	}
 	otherUserId, err := strconv.ParseInt(sotherUserId, 10, 64)
 	if err != nil {
+		httpWriteIllegalArgResul(w)
 		return
 	}
 
@@ -109,15 +140,15 @@ func (usc *UserController) UpdateRelationship(w http.ResponseWriter, r *http.Req
 	var bodyReq UpdateRelationshipReq
 	json.Unmarshal(body, &bodyReq)
 
-	if len(bodyReq.State) <= 0 {
-		httpWriteResultAsErr(w, errors.New("invalid argument : state"))
+	if bodyReq.State != "liked" && bodyReq.State != "disliked" {
+		httpWriteIllegalArgResul(w)
 		return
 	}
 
 	relationship, err := service.G_uss.UpdateRelationship(userId, otherUserId, bodyReq.State)
 	if err != nil {
-		httpWriteResultAsErr(w, err)
+		httpWriteErrResult(w)
 	} else {
-		httpWriteResultAsJson(w, relationship)
+		httpWriteJsonResult(w, relationship)
 	}
 }

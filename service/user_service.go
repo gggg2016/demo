@@ -3,7 +3,6 @@ package service
 import (
 	"strconv"
 	"demo/dao"
-	"demo/util"
 )
 
 type UserModel struct {
@@ -29,7 +28,7 @@ func init() {
 
 func (uss *UserService) ListAllUsers() ([]UserModel, error) {
 	users, err := dao.G_usd.ListAllUser()
-	if err != nil || len(users) <= 0 {
+	if err != nil {
 		return nil, err
 	}
 
@@ -44,6 +43,16 @@ func transformUserToUserModel(u dao.User) UserModel {
 	return UserModel{strconv.FormatInt(u.Id, 10), u.Name, "user"}
 }
 
+func stateString(state int8) string {
+	switch state {
+	case dao.LIKED:
+		return "liked"
+	case dao.MATCHED:
+		return "matched"
+	default:
+		return "disliked"
+	}
+}
 func (uss *UserService) CreateUser(name string) (UserModel, error) {
 	id, err := dao.G_usd.Register(name)
 	if err != nil {
@@ -54,67 +63,28 @@ func (uss *UserService) CreateUser(name string) (UserModel, error) {
 }
 
 func (uss *UserService) ListAllRelationshipOfUser(userId int64) ([]RelationShip, error) {
-	//liked, matched included
-	likedUserIds, err := dao.G_usd.ListLikedUser(userId)
+	m, err := dao.G_usd.GetRelationshipsOfUser(userId)
 	if err != nil {
 		return nil, err
 	}
-	//matched
-	matchedUserIds, err := dao.G_usd.ListMatchedUser(userId)
-	if err != nil {
-		return nil, err
-	}
-	//disliked
-	dislikedUserIds, err := dao.G_usd.ListDislikedUser(userId)
-	if err != nil {
-		return nil, err
-	}
-	//singel-liked, matched not included
-	singleLikedUserIds := util.Sub(likedUserIds, matchedUserIds)
 
 	relationships := make([]RelationShip, 0)
-	for _, u := range singleLikedUserIds {
-		relationships = append(relationships, RelationShip{strconv.FormatInt(u, 10), "liked", "relationship"})
-	}
-	for _, u := range matchedUserIds {
-		relationships = append(relationships, RelationShip{strconv.FormatInt(u, 10), "matched", "relationship"})
-	}
-	for _, u := range dislikedUserIds {
-		relationships = append(relationships, RelationShip{strconv.FormatInt(u, 10), "disliked", "relationship"})
+	for userId, state := range m {
+		relationships = append(relationships, RelationShip{User_id: strconv.FormatInt(userId, 10), State: stateString(state), Type: "relationship"})
 	}
 	return relationships, nil
 }
 
 func (uss *UserService) UpdateRelationship(userId, otherUserId int64, state string) (RelationShip, error) {
-	var st int8
-	switch state {
-	case "liked":
-		st = dao.LIKE
-	case "disliked":
-		st = dao.DISLIKE
-	}
-
 	//update relationship state
-	if st == 1 || st == -1 {
-		dao.G_usd.UpdateRelationship(userId, otherUserId, st)
-	}
+	dao.G_usd.UpdateRelationship(userId, otherUserId, state)
 
 	//query result state
-	var resState string
-	r1, r2, err := dao.G_usd.GetRelationship(userId, otherUserId)
+	r, err := dao.G_usd.GetRelationship(userId, otherUserId)
 
 	if err != nil {
 		return RelationShip{}, err
 	}
 
-	switch {
-	case r1 == -1:
-		resState = "disliked"
-	case r1 == 1 && r2 != 1:
-		resState = "liked"
-	case r1 == 1 && r2 == 1:
-		resState = "matched"
-	}
-
-	return RelationShip{strconv.FormatInt(otherUserId, 10), resState, "relationship"}, nil
+	return RelationShip{strconv.FormatInt(otherUserId, 10), stateString(r), "relationship"}, nil
 }
