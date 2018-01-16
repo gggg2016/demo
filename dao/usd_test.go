@@ -30,6 +30,6 @@ func Test_ListAllUser(t *testing.T) {
 
 func Test_UpdateRelationship(t *testing.T) {
 	usd := new(UserDaoerImpl)
-	r, _ := usd.UpdateRelationship(2, 8, 1)
+	r, _ := usd.UpdateRelationship(2, 8, "liked")
 	t.Error(r)
 }

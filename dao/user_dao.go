@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	LIKE    = 1
-	DISLIKE = -1
-	NONE    = 0
+	LIKED    = iota
+	DISLIKED
+	MATCHED
 )
 
 /**
@@ -28,11 +28,9 @@ type UserDaoer interface {
 	Register(userName string) (int64, error)
 	GetUser(userIds []int64) (map[int64]User, error)
 	ListAllUser() ([]User, error)
-	UpdateRelationship(first_user_id, second_user_id int64, state int8) (bool, error)
-	ListLikedUser(userId int64) ([]int64, error)
-	ListDislikedUser(userId int64) ([]int64, error)
-	ListMatchedUser(userId int64) ([]int64, error)
-	GetRelationship(first_user_id, second_user_id int64) (int8, int8, error)
+	UpdateRelationship(user_id, other_user_id int64, state string) (bool, error)
+	GetRelationshipsOfUser(user_id int64) (map[int64]int8, error)
+	GetRelationship(user_id, other_user_id int64) (int8, error)
 }
 
 type UserDaoerImpl struct {
@@ -44,35 +42,12 @@ func init() {
 	G_usd = new(UserDaoerImpl)
 }
 
-func (usd *UserDaoerImpl) CreateTableRelationships() error {
-	_, err := G_db.Exec(`CREATE TABLE public.relationships
-								(
-									id bigint NOT NULL DEFAULT nextval('relationship_id_seq'::regclass),
-									first_user_id bigint NOT NULL,
-									second_user_id bigint NOT NULL,
-									state smallint NOT NULL,
-									CONSTRAINT relationship_pkey PRIMARY KEY (id),
-									CONSTRAINT user_pair UNIQUE (first_user_id, second_user_id)
-								)`)
-	return err
-
-}
-
-func (usd *UserDaoerImpl) CreateTableUsers() error {
-	_, err := G_db.Exec(`CREATE TABLE public.users
-								(
-									id bigint NOT NULL DEFAULT nextval('user_id_seq'::regclass),
-									name character varying(10) COLLATE pg_catalog."default" NOT NULL,
-									create_time timestamp with time zone,
-									update_time timestamp with time zone,
-									CONSTRAINT user_pkey PRIMARY KEY (id)
-								)`)
-	return err
-}
-
+/**
+ *注册新用户
+ */
 func (usd *UserDaoerImpl) Register(userName string) (int64, error) {
 	var uid int64
-	err := G_db.QueryRow("INSERT INTO public.users(name,create_time,update_time) VALUES($1,now(),now()) RETURNING id",
+	err := G_db.QueryRow("INSERT INTO users(name) VALUES($1) RETURNING id",
 		username).Scan(&uid)
 	if err != nil {
 		return -1, err
@@ -80,6 +55,9 @@ func (usd *UserDaoerImpl) Register(userName string) (int64, error) {
 	return uid, nil
 }
 
+/**
+ *批量获取用户信息
+ */
 func (usd *UserDaoerImpl) GetUser(userIds []int64) (map[int64]User, error) {
 	str := ``
 	for _, val := range userIds {
@@ -91,7 +69,7 @@ func (usd *UserDaoerImpl) GetUser(userIds []int64) (map[int64]User, error) {
 		return nil, errors.New("invalid args : userIds")
 	}
 
-	sql := fmt.Sprintf("SELECT id,name FROM public.users WHERE id IN (%s)", str)
+	sql := fmt.Sprintf("SELECT id,name FROM users WHERE id IN (%s)", str)
 
 	rows, err := G_db.Query(sql)
 	if err != nil {
@@ -106,6 +84,9 @@ func (usd *UserDaoerImpl) GetUser(userIds []int64) (map[int64]User, error) {
 	return usermap, nil
 }
 
+/**
+ *获取DB中的所有用户
+ */
 func (usd *UserDaoerImpl) ListAllUser() ([]User, error) {
 	stmt, err := G_db.Prepare("SELECT id,name FROM users ORDER BY id")
 	if err != nil {
@@ -124,9 +105,13 @@ func (usd *UserDaoerImpl) ListAllUser() ([]User, error) {
 	return users, nil
 }
 
-func (usd *UserDaoerImpl) UpdateRelationship(first_user_id, second_user_id int64, state int8) (bool, error) {
-	_, err := G_db.Exec(`INSERT INTO relationships(first_user_id,second_user_id,state) VALUES($1,$2,$3)
-	ON CONFLICT(first_user_id,second_user_id) DO UPDATE SET state=$3`, first_user_id, second_user_id, state)
+/**
+ *更新两个用户之间的关系
+ *state取值仅限liked或disliked
+ */
+func (usd *UserDaoerImpl) UpdateRelationship(user_id, other_user_id int64, state string) (bool, error) {
+	_, err := G_db.Exec(`INSERT INTO relationships(user_id,other_user_id,state) VALUES($1,$2,$3)
+	ON CONFLICT(user_id,other_user_id) DO UPDATE SET state=$3`, user_id, other_user_id, state)
 	if err != nil {
 		return false, err
 	} else {
@@ -134,74 +119,56 @@ func (usd *UserDaoerImpl) UpdateRelationship(first_user_id, second_user_id int64
 	}
 }
 
-func (usd *UserDaoerImpl) ListLikedUser(userId int64) ([]int64, error) {
-	rows, err := G_db.Query(`SELECT second_user_id FROM relationships
-		WHERE first_user_id=$1 AND state=1`, userId)
-
+/**
+ *获取与指定用户有关系的所有相关用户及关系状态
+ *注：状态包包括（liked,matched,disliked）
+ */
+func (usd *UserDaoerImpl) GetRelationshipsOfUser(userId int64) (map[int64]int8, error) {
+	rows, err := G_db.Query(`SELECT r1.other_user_id,r1.state,r2.state
+									FROM relationships AS r1 LEFT JOIN relationships AS r2
+									ON r1.user_id=r2.other_user_id AND r1.other_user_id=r2.user_id
+									WHERE r1.user_id=$1`, userId)
 	if err != nil {
 		return nil, err
 	}
 
-	userIds := make([]int64, 0)
+	m := make(map[int64]int8)
 	for rows.Next() {
-		var userId int64
-		rows.Scan(&userId)
-		userIds = append(userIds, userId)
+		var u int64
+		var state1, state2 string
+		rows.Scan(&u, &state1, &state2)
+		m[u] = getIntState(state1, state2)
 	}
-	return userIds, nil
-}
-func (usd *UserDaoerImpl) ListDislikedUser(userId int64) ([]int64, error) {
-	rows, err := G_db.Query(`SELECT second_user_id FROM relationships
-		WHERE first_user_id=$1 AND state=-1`, userId)
-
-	if err != nil {
-		return nil, err
-	}
-
-	userIds := make([]int64, 0)
-	for rows.Next() {
-		var userId int64
-		rows.Scan(&userId)
-		userIds = append(userIds, userId)
-	}
-	return userIds, nil
+	return m, nil
 }
 
-func (usd *UserDaoerImpl) ListMatchedUser(userId int64) ([]int64, error) {
-	rows, err := G_db.Query(`SELECT r1.second_user_id FROM relationships AS r1,relationships AS r2
-		WHERE r1.first_user_id=$1 AND r1.state=1 AND r2.state=1 AND
-		r1.first_user_id=r2.second_user_id AND r1.second_user_id=r2.first_user_id`, userId)
+/**
+ *获取一个用户对另一个用户的关系
+ */
+func (usd *UserDaoerImpl) GetRelationship(userId, otherUserID int64) (int8, error) {
+	var state1, state2 string
+	err := G_db.QueryRow(`SELECT r1.state,r2.state
+								FROM relationships AS r1 LEFT JOIN relationships AS r2
+								ON r1.user_id=r2.other_user_id AND r1.other_user_id=r2.user_id
+								WHERE r1.user_id=$1 AND r1.other_user_id=$2`, userId, otherUserID).Scan(&state1, &state2)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-
-	userIds := make([]int64, 0)
-	for rows.Next() {
-		var userId int64
-		rows.Scan(&userId)
-		userIds = append(userIds, userId)
-	}
-	return userIds, nil
+	return getIntState(state1, state2), nil
 }
 
-func (usd *UserDaoerImpl) GetRelationship(first_user_id, second_user_id int64) (int8, int8, error) {
-	rows, err := G_db.Query(`SELECT first_user_id,second_user_id,state FROM relationships
-		WHERE (first_user_id=$1 AND second_user_id=$2) OR (first_user_id=$2 AND second_user_id=$1)`, first_user_id, second_user_id)
-	if err != nil {
-		return 0, 0, err
+/**
+  *根据user和other_user的双边关系，判定user对other_user的关系
+  *注：只适用于state1为liked或disliked的场景
+ */
+func getIntState(state1, state2 string) int8 {
+	var state int8
+	if state1 == "disliked" {
+		state = DISLIKED
+	} else if state1 == "liked" && state2 == "liked" {
+		state = MATCHED
+	} else {
+		state = LIKED
 	}
-
-	var r1, r2 int8
-	for rows.Next() {
-		var u1, u2 int64
-		var state int8
-		rows.Scan(&u1, &u2, &state)
-		switch {
-		case u1 == first_user_id:
-			r1 = state
-		case u1 == second_user_id:
-			r2 = state
-		}
-	}
-	return r1, r2, nil
+	return state
 }
